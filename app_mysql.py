@@ -478,7 +478,7 @@ class ResortBookingApp(ctk.CTk):
         self.booking_table.column("nights", width=65, anchor="center", stretch=False)
         self.booking_table.column("guests", width=65, anchor="center", stretch=False)
         self.booking_table.column("room", width=120, anchor="w")
-        self.booking_table.column("amount", width=95, anchor="e")
+        self.booking_table.column("amount", width=130, minwidth=130, anchor="e", stretch=False)
         self.booking_table.column("room_id", width=0, stretch=False)
 
         booking_scroll = ttk.Scrollbar(
@@ -633,7 +633,7 @@ class ResortBookingApp(ctk.CTk):
         self.room_table.column("id", width=55, anchor="center", stretch=False)
         self.room_table.column("room_name", width=220, anchor="w")
         self.room_table.column("capacity", width=110, anchor="center")
-        self.room_table.column("price", width=130, anchor="e")
+        self.room_table.column("price", width=130, minwidth=130, anchor="e", stretch=False)
 
         room_scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.room_table.yview)
         room_scroll.grid(row=0, column=1, sticky="ns")
