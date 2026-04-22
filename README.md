@@ -36,6 +36,8 @@ CREATE TABLE bookings (
 );
 ```
 
+Note: `price` is stored as `DECIMAL(10,2)` in MySQL and shown in the app as numeric text with 2 decimal places.
+
 Set environment variables as needed:
 - `MYSQL_HOST` (default: `127.0.0.1`)
 - `MYSQL_PORT` (default: `3306`)
