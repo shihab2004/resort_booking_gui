@@ -37,16 +37,30 @@ def init_db():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT COUNT(*)
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE()
-              AND table_name IN ('rooms', 'bookings')
+            CREATE TABLE IF NOT EXISTS rooms (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                room_name VARCHAR(255) NOT NULL UNIQUE,
+                capacity INT NOT NULL,
+                price DECIMAL(10, 2) NOT NULL
+            ) ENGINE=InnoDB
             """
         )
-        if cursor.fetchone()[0] != 2:
-            raise RuntimeError(
-                "Required MySQL tables not found. Please create 'rooms' and 'bookings' first (see README MySQL Setup)."
-            )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bookings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guest_name VARCHAR(255) NOT NULL,
+                phone VARCHAR(64) NOT NULL,
+                check_in DATE NOT NULL,
+                nights INT NOT NULL,
+                guests INT NOT NULL,
+                room_type VARCHAR(255) NOT NULL,
+                room_id INT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (room_id) REFERENCES rooms(id)
+            ) ENGINE=InnoDB
+            """
+        )
 
 
 def add_room_record(room_name, capacity, price):
