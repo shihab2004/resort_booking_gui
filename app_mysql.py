@@ -208,6 +208,7 @@ class ResortBookingApp(ctk.CTk):
         self.guests_var = ctk.StringVar(value="2")
         self.booking_room_var = ctk.StringVar(value="No Rooms")
         self.booking_delete_id_var = ctk.StringVar()
+        self.booking_amount_preview_var = ctk.StringVar(value="Estimated Amount: $0.00")
 
         self.room_name_var = ctk.StringVar()
         self.room_capacity_var = ctk.StringVar(value="2")
@@ -226,6 +227,9 @@ class ResortBookingApp(ctk.CTk):
         self._build_header()
         self._build_tabs()
         self._build_footer()
+
+        self.nights_var.trace_add("write", lambda *_: self.update_booking_amount_preview())
+        self.booking_room_var.trace_add("write", lambda *_: self.update_booking_amount_preview())
 
         self.refresh_rooms(update_status=False)
         self.refresh_bookings(update_status=True)
@@ -368,8 +372,16 @@ class ResortBookingApp(ctk.CTk):
             row=11, column=0, columnspan=2, sticky="ew", padx=20
         )
 
+        ctk.CTkLabel(
+            form_card,
+            textvariable=self.booking_amount_preview_var,
+            text_color="#34D399",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            anchor="w",
+        ).grid(row=12, column=0, columnspan=2, sticky="ew", padx=20, pady=(12, 2))
+
         btn_row = ctk.CTkFrame(form_card, fg_color="transparent")
-        btn_row.grid(row=12, column=0, columnspan=2, sticky="ew", padx=20, pady=(18, 20))
+        btn_row.grid(row=13, column=0, columnspan=2, sticky="ew", padx=20, pady=(16, 20))
         btn_row.grid_columnconfigure((0, 1, 2), weight=1)
 
         ctk.CTkButton(
@@ -777,11 +789,13 @@ class ResortBookingApp(ctk.CTk):
             self.room_option_map[option_text] = {
                 "id": int(room_id),
                 "name": room_name,
+                "price": float(_price or 0),
             }
 
         if not options:
             self.booking_room_menu.configure(values=["No Rooms"])
             self.booking_room_var.set("No Rooms")
+            self.update_booking_amount_preview()
             return
 
         current = self.booking_room_var.get()
@@ -790,6 +804,24 @@ class ResortBookingApp(ctk.CTk):
         if current not in self.room_option_map:
             current = options[0]
             self.booking_room_var.set(current)
+
+        self.update_booking_amount_preview()
+
+    def update_booking_amount_preview(self):
+        room_data = self.room_option_map.get(self.booking_room_var.get())
+        if not room_data:
+            self.booking_amount_preview_var.set("Estimated Amount: $0.00")
+            return
+
+        try:
+            nights = int(self.nights_var.get().strip())
+            if nights < 0:
+                nights = 0
+        except ValueError:
+            nights = 0
+
+        amount = nights * float(room_data.get("price", 0))
+        self.booking_amount_preview_var.set(f"Estimated Amount: ${amount:.2f}")
 
     def select_booking_room_by_room_id(self, room_id):
         for option_text, room_data in self.room_option_map.items():
