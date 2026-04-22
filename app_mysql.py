@@ -34,7 +34,19 @@ def get_db_connection():
 
 def init_db():
     with get_db_connection() as conn:
-        conn.cursor().execute("SELECT 1")
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name IN ('rooms', 'bookings')
+            """
+        )
+        if cursor.fetchone()[0] != 2:
+            raise RuntimeError(
+                "Required MySQL tables not found. Please create 'rooms' and 'bookings' tables first."
+            )
 
 
 def add_room_record(room_name, capacity, price):
