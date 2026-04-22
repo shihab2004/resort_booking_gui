@@ -45,7 +45,7 @@ def init_db():
         )
         if cursor.fetchone()[0] != 2:
             raise RuntimeError(
-                "Required MySQL tables not found. Please create 'rooms' and 'bookings' tables first."
+                "Required MySQL tables not found. Please create 'rooms' and 'bookings' first (see README MySQL Setup)."
             )
 
 
