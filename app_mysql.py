@@ -1,16 +1,11 @@
-import importlib
 import os
-import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from tkinter import messagebox, ttk
 
 import customtkinter as ctk
-
-DB_PATH = Path(__file__).with_name("bookings.db")
-DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").strip().lower()
-USE_MYSQL = DB_ENGINE == "mysql"
+import mysql.connector
+from mysql.connector import IntegrityError
 
 MYSQL_CONFIG = {
     "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
@@ -21,26 +16,8 @@ MYSQL_CONFIG = {
 }
 
 
-def get_mysql_connection():
-    """Create and return a connection to a MySQL server database."""
-    try:
-        mysql_connector = importlib.import_module("mysql.connector")
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "mysql-connector-python is not installed. Run: pip install mysql-connector-python"
-        ) from exc
-
-    # Uses MYSQL_* environment variables so credentials stay out of source code.
-    return mysql_connector.connect(**MYSQL_CONFIG)
-
-
 def get_connection():
-    if USE_MYSQL:
-        return get_mysql_connection()
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return mysql.connector.connect(**MYSQL_CONFIG)
 
 
 @contextmanager
@@ -55,117 +32,42 @@ def get_db_connection():
     finally:
         conn.close()
 
-
-def adapt_query_placeholders(query):
-    if USE_MYSQL:
-        return query.replace("?", "%s")
-    return query
-
-
-def execute_query(conn, query, params=()):
-    sql = adapt_query_placeholders(query)
-    if USE_MYSQL:
-        cursor = conn.cursor()
-        cursor.execute(sql, params)
-        return cursor
-    return conn.execute(sql, params)
-
-
-def execute_many(conn, query, params_seq):
-    sql = adapt_query_placeholders(query)
-    if USE_MYSQL:
-        cursor = conn.cursor()
-        cursor.executemany(sql, params_seq)
-        return cursor
-    return conn.executemany(sql, params_seq)
-
-
-def seed_default_rooms(conn):
-    count = execute_query(conn, "SELECT COUNT(*) FROM rooms").fetchone()[0]
-    if count == 0:
-        execute_many(
-            conn,
-            "INSERT INTO rooms (room_name, capacity, price) VALUES (?, ?, ?)",
-            [
-                ("Standard", 2, 120.0),
-                ("Deluxe", 3, 180.0),
-                ("Suite", 4, 260.0),
-                ("Villa", 6, 420.0),
-            ],
-        )
-
-
 def init_db():
     with get_db_connection() as conn:
-        if USE_MYSQL:
-            execute_query(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS rooms (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    room_name VARCHAR(255) NOT NULL UNIQUE,
-                    capacity INT NOT NULL,
-                    price DECIMAL(10, 2) NOT NULL
-                ) ENGINE=InnoDB
-                """,
-            )
-
-            execute_query(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS bookings (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    guest_name VARCHAR(255) NOT NULL,
-                    phone VARCHAR(64) NOT NULL,
-                    check_in DATE NOT NULL,
-                    nights INT NOT NULL,
-                    guests INT NOT NULL,
-                    room_type VARCHAR(255) NOT NULL,
-                    room_id INT,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (room_id) REFERENCES rooms(id)
-                ) ENGINE=InnoDB
-                """,
-            )
-        else:
-            execute_query(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS rooms (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    room_name TEXT NOT NULL UNIQUE,
-                    capacity INTEGER NOT NULL,
-                    price REAL NOT NULL
-                )
-                """,
-            )
-
-            execute_query(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS bookings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guest_name TEXT NOT NULL,
-                    phone TEXT NOT NULL,
-                    check_in TEXT NOT NULL,
-                    nights INTEGER NOT NULL,
-                    guests INTEGER NOT NULL,
-                    room_type TEXT NOT NULL,
-                    room_id INTEGER,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (room_id) REFERENCES rooms(id)
-                )
-                """,
-            )
-
-        seed_default_rooms(conn)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rooms (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                room_name VARCHAR(255) NOT NULL UNIQUE,
+                capacity INT NOT NULL,
+                price DECIMAL(10, 2) NOT NULL
+            ) ENGINE=InnoDB
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bookings (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guest_name VARCHAR(255) NOT NULL,
+                phone VARCHAR(64) NOT NULL,
+                check_in DATE NOT NULL,
+                nights INT NOT NULL,
+                guests INT NOT NULL,
+                room_type VARCHAR(255) NOT NULL,
+                room_id INT,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (room_id) REFERENCES rooms(id)
+            ) ENGINE=InnoDB
+            """
+        )
 
 
 def add_room_record(room_name, capacity, price):
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
-            "INSERT INTO rooms (room_name, capacity, price) VALUES (?, ?, ?)",
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO rooms (room_name, capacity, price) VALUES (%s, %s, %s)",
             (room_name, capacity, price),
         )
         return cursor.lastrowid
@@ -173,12 +75,12 @@ def add_room_record(room_name, capacity, price):
 
 def update_room_record(room_id, room_name, capacity, price):
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
+        cursor = conn.cursor()
+        cursor.execute(
             """
             UPDATE rooms
-            SET room_name = ?, capacity = ?, price = ?
-            WHERE id = ?
+            SET room_name = %s, capacity = %s, price = %s
+            WHERE id = %s
             """,
             (room_name, capacity, price, room_id),
         )
@@ -187,44 +89,39 @@ def update_room_record(room_id, room_name, capacity, price):
 
 def fetch_rooms():
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
-            "SELECT id, room_name, capacity, price FROM rooms ORDER BY id DESC"
-        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, room_name, capacity, price FROM rooms ORDER BY id DESC")
         return cursor.fetchall()
 
 
 def fetch_rooms_for_options():
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
-            "SELECT id, room_name, capacity, price FROM rooms ORDER BY room_name"
-        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, room_name, capacity, price FROM rooms ORDER BY room_name")
         return cursor.fetchall()
 
 
 def delete_room_record(room_id):
     with get_db_connection() as conn:
-        linked_count = execute_query(
-            conn,
-            "SELECT COUNT(*) FROM bookings WHERE room_id = ?", (room_id,)
-        ).fetchone()[0]
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM bookings WHERE room_id = %s", (room_id,))
+        linked_count = cursor.fetchone()[0]
 
         if linked_count > 0:
             return 0, linked_count
 
-        cursor = execute_query(conn, "DELETE FROM rooms WHERE id = ?", (room_id,))
+        cursor.execute("DELETE FROM rooms WHERE id = %s", (room_id,))
         return cursor.rowcount, 0
 
 
 def add_booking_record(name, phone, check_in, nights, guests, room_id, room_name):
     with get_db_connection() as conn:
-        execute_query(
-            conn,
+        cursor = conn.cursor()
+        cursor.execute(
             """
             INSERT INTO bookings
             (guest_name, phone, check_in, nights, guests, room_type, room_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (name, phone, check_in, nights, guests, room_name, room_id),
         )
@@ -234,18 +131,18 @@ def update_booking_record(
     booking_id, name, phone, check_in, nights, guests, room_id, room_name
 ):
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
+        cursor = conn.cursor()
+        cursor.execute(
             """
             UPDATE bookings
-            SET guest_name = ?,
-                phone = ?,
-                check_in = ?,
-                nights = ?,
-                guests = ?,
-                room_type = ?,
-                room_id = ?
-            WHERE id = ?
+            SET guest_name = %s,
+                phone = %s,
+                check_in = %s,
+                nights = %s,
+                guests = %s,
+                room_type = %s,
+                room_id = %s
+            WHERE id = %s
             """,
             (name, phone, check_in, nights, guests, room_name, room_id, booking_id),
         )
@@ -254,8 +151,8 @@ def update_booking_record(
 
 def fetch_bookings():
     with get_db_connection() as conn:
-        cursor = execute_query(
-            conn,
+        cursor = conn.cursor()
+        cursor.execute(
             """
             SELECT
                 b.id,
@@ -277,20 +174,22 @@ def fetch_bookings():
 
 def delete_booking_record(booking_id):
     with get_db_connection() as conn:
-        cursor = execute_query(conn, "DELETE FROM bookings WHERE id = ?", (booking_id,))
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM bookings WHERE id = %s", (booking_id,))
         return cursor.rowcount
 
 
 def get_total_booking_revenue():
     with get_db_connection() as conn:
-        value = execute_query(
-            conn,
+        cursor = conn.cursor()
+        cursor.execute(
             """
             SELECT COALESCE(SUM(b.nights * COALESCE(r.price, 0)), 0)
             FROM bookings b
             LEFT JOIN rooms r ON r.id = b.room_id
             """
-        ).fetchone()[0]
+        )
+        value = cursor.fetchone()[0]
         return float(value or 0)
 
 
@@ -309,6 +208,7 @@ class ResortBookingApp(ctk.CTk):
         self.guests_var = ctk.StringVar(value="2")
         self.booking_room_var = ctk.StringVar(value="No Rooms")
         self.booking_delete_id_var = ctk.StringVar()
+        self.booking_amount_preview_var = ctk.StringVar(value="Estimated Amount: $0.00")
 
         self.room_name_var = ctk.StringVar()
         self.room_capacity_var = ctk.StringVar(value="2")
@@ -327,6 +227,9 @@ class ResortBookingApp(ctk.CTk):
         self._build_header()
         self._build_tabs()
         self._build_footer()
+
+        self.nights_var.trace_add("write", lambda *_: self.update_booking_amount_preview())
+        self.booking_room_var.trace_add("write", lambda *_: self.update_booking_amount_preview())
 
         self.refresh_rooms(update_status=False)
         self.refresh_bookings(update_status=True)
@@ -369,7 +272,7 @@ class ResortBookingApp(ctk.CTk):
 
         ctk.CTkLabel(
             header,
-            text="Booking and Room tabs with SQLite / MySQL relation",
+            text="Booking and Room tabs with MySQL database",
             text_color="#9CA3AF",
             font=ctk.CTkFont(size=14),
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
@@ -469,8 +372,16 @@ class ResortBookingApp(ctk.CTk):
             row=11, column=0, columnspan=2, sticky="ew", padx=20
         )
 
+        ctk.CTkLabel(
+            form_card,
+            textvariable=self.booking_amount_preview_var,
+            text_color="#34D399",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            anchor="w",
+        ).grid(row=12, column=0, columnspan=2, sticky="ew", padx=20, pady=(12, 2))
+
         btn_row = ctk.CTkFrame(form_card, fg_color="transparent")
-        btn_row.grid(row=12, column=0, columnspan=2, sticky="ew", padx=20, pady=(18, 20))
+        btn_row.grid(row=13, column=0, columnspan=2, sticky="ew", padx=20, pady=(16, 20))
         btn_row.grid_columnconfigure((0, 1, 2), weight=1)
 
         ctk.CTkButton(
@@ -567,7 +478,7 @@ class ResortBookingApp(ctk.CTk):
         self.booking_table.column("nights", width=65, anchor="center", stretch=False)
         self.booking_table.column("guests", width=65, anchor="center", stretch=False)
         self.booking_table.column("room", width=120, anchor="w")
-        self.booking_table.column("amount", width=95, anchor="e")
+        self.booking_table.column("amount", width=130, minwidth=130, anchor="e", stretch=False)
         self.booking_table.column("room_id", width=0, stretch=False)
 
         booking_scroll = ttk.Scrollbar(
@@ -722,7 +633,7 @@ class ResortBookingApp(ctk.CTk):
         self.room_table.column("id", width=55, anchor="center", stretch=False)
         self.room_table.column("room_name", width=220, anchor="w")
         self.room_table.column("capacity", width=110, anchor="center")
-        self.room_table.column("price", width=130, anchor="e")
+        self.room_table.column("price", width=130, minwidth=130, anchor="e", stretch=False)
 
         room_scroll = ttk.Scrollbar(table_wrap, orient="vertical", command=self.room_table.yview)
         room_scroll.grid(row=0, column=1, sticky="ns")
@@ -878,11 +789,13 @@ class ResortBookingApp(ctk.CTk):
             self.room_option_map[option_text] = {
                 "id": int(room_id),
                 "name": room_name,
+                "price": float(_price or 0),
             }
 
         if not options:
             self.booking_room_menu.configure(values=["No Rooms"])
             self.booking_room_var.set("No Rooms")
+            self.update_booking_amount_preview()
             return
 
         current = self.booking_room_var.get()
@@ -891,6 +804,24 @@ class ResortBookingApp(ctk.CTk):
         if current not in self.room_option_map:
             current = options[0]
             self.booking_room_var.set(current)
+
+        self.update_booking_amount_preview()
+
+    def update_booking_amount_preview(self):
+        room_data = self.room_option_map.get(self.booking_room_var.get())
+        if not room_data:
+            self.booking_amount_preview_var.set("Estimated Amount: $0.00")
+            return
+
+        try:
+            nights = int(self.nights_var.get().strip())
+            if nights < 0:
+                nights = 0
+        except ValueError:
+            nights = 0
+
+        amount = nights * float(room_data.get("price", 0))
+        self.booking_amount_preview_var.set(f"Estimated Amount: ${amount:.2f}")
 
     def select_booking_room_by_room_id(self, room_id):
         for option_text, room_data in self.room_option_map.items():
@@ -1039,7 +970,7 @@ class ResortBookingApp(ctk.CTk):
 
         try:
             add_room_record(*values)
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             messagebox.showerror("Duplicate Room", "Room Name already exists.")
             return
 
@@ -1064,7 +995,7 @@ class ResortBookingApp(ctk.CTk):
 
         try:
             updated = update_room_record(room_id, *values)
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             messagebox.showerror("Duplicate Room", "Room Name already exists.")
             return
 
